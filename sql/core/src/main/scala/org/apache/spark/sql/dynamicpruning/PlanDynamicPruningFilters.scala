@@ -19,7 +19,7 @@ package org.apache.spark.sql.dynamicpruning
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions
-import org.apache.spark.sql.catalyst.expressions.{Alias, BindReferences, DynamicPruningExpression, DynamicPruningSubquery, Expression, ListQuery, Literal, PredicateHelper}
+import org.apache.spark.sql.catalyst.expressions.{AttributeReference, BindReferences, DynamicPruningExpression, DynamicPruningSubquery, Expression, ListQuery, Literal, PredicateHelper}
 import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, LogicalPlan}
 import org.apache.spark.sql.catalyst.plans.physical.BroadcastMode
 import org.apache.spark.sql.catalyst.rules.Rule
@@ -27,6 +27,9 @@ import org.apache.spark.sql.execution.{InSubqueryExec, QueryExecution, SparkPlan
 import org.apache.spark.sql.execution.exchange.BroadcastExchangeExec
 import org.apache.spark.sql.execution.joins._
 import org.apache.spark.sql.internal.SQLConf
+import org.apache.spark.sql.types.StructType
+
+import scala.collection.mutable.ArrayBuffer
 
 /**
  * This planner rule aims at rewriting dynamic pruning predicates in order to reuse the
@@ -51,6 +54,8 @@ case class PlanDynamicPruningFilters(sparkSession: SparkSession)
     if (!SQLConf.get.dynamicPartitionPruningEnabled) {
       return plan
     }
+
+    val dppQueriesMap = mutable.HashMap[StructType, ArrayBuffer[AttributeReference]]()
 
     plan transformAllExpressions {
       case DynamicPruningSubquery(
@@ -82,12 +87,21 @@ case class PlanDynamicPruningFilters(sparkSession: SparkSession)
           // it is not worthwhile to execute the query, so we fall-back to a true literal
           DynamicPruningExpression(Literal.TrueLiteral)
         } else {
-          // we need to apply an aggregate on the buildPlan in order to be column pruned
-          val alias = Alias(buildKeys(broadcastKeyIndex), buildKeys(broadcastKeyIndex).toString)()
-          val aggregate = Aggregate(Seq(alias), Seq(alias), buildPlan)
+          val attrRef = buildKeys(broadcastKeyIndex)
+          val sameSchema = dppQueriesMap.getOrElseUpdate(buildPlan.schema, ArrayBuffer[AttributeReference]())
+          sameSchema += attrRef
           DynamicPruningExpression(expressions.InSubquery(
-            Seq(value), ListQuery(aggregate, childOutputs = aggregate.output)))
+            Seq(value), ListQuery(buildPlan, Seq(buildKeys(broadcastKeyIndex)),
+               childOutputs = buildPlan.output)))
         }
+    } transformAllExpressions {
+      case DynamicPruningExpression(expressions.InSubquery(
+          values, ListQuery(buildPlan, children, exprId, _))) =>
+        val attrRefs = dppQueriesMap.get(buildPlan.schema).get
+        val aggregate = Aggregate(attrRefs, attrRefs.map(_.asInstanceOf[AttributeReference]),
+          buildPlan)
+        DynamicPruningExpression(expressions.InSubquery(
+          values, ListQuery(aggregate, children, exprId, aggregate.output)))
     }
   }
 }

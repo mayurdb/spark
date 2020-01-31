@@ -114,7 +114,8 @@ case class InSubqueryExec(
     child: Expression,
     plan: BaseSubqueryExec,
     exprId: ExprId,
-    private var resultBroadcast: Broadcast[Array[Any]] = null) extends ExecSubqueryExpression {
+    private var resultBroadcast: Broadcast[Array[Any]] = null,
+    ordinal: Int = 0) extends ExecSubqueryExpression {
 
   @transient private var result: Array[Any] = _
 
@@ -133,7 +134,7 @@ case class InSubqueryExec(
     val rows = plan.executeCollect()
     result = child.dataType match {
       case _: StructType => rows.toArray
-      case _ => rows.map(_.get(0, child.dataType))
+      case _ => rows.map(_.get(ordinal, child.dataType))
     }
     resultBroadcast = plan.sqlContext.sparkContext.broadcast(result)
   }
@@ -182,7 +183,7 @@ case class PlanSubqueries(sparkSession: SparkSession) extends Rule[SparkPlan] {
         ScalarSubquery(
           SubqueryExec(s"scalar-subquery#${subquery.exprId.id}", executedPlan),
           subquery.exprId)
-      case expressions.InSubquery(values, ListQuery(query, _, exprId, _)) =>
+      case expressions.InSubquery(values, ListQuery(query, children, exprId, _)) =>
         val expr = if (values.length == 1) {
           values.head
         } else {
@@ -193,7 +194,13 @@ case class PlanSubqueries(sparkSession: SparkSession) extends Rule[SparkPlan] {
           )
         }
         val executedPlan = QueryExecution.prepareExecutedPlan(sparkSession, query)
-        InSubqueryExec(expr, SubqueryExec(s"subquery#${exprId.id}", executedPlan), exprId)
+        val ordinal = if (children.length == 1) {
+          executedPlan.output.indexWhere(_.equals(children.head))
+        } else {
+          0
+        }
+        InSubqueryExec(expr, SubqueryExec(s"subquery#${exprId.id}", executedPlan), exprId,
+	  ordinal=ordinal)
     }
   }
 }
