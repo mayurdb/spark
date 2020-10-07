@@ -39,6 +39,7 @@ import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, ExprCo
 import org.apache.spark.sql.catalyst.plans.physical.HashPartitioning
 import org.apache.spark.sql.catalyst.util.{CaseInsensitiveMap, DateTimeUtils}
 import org.apache.spark.sql.execution.{ProjectExec, SortExec, SparkPlan, SQLExecution}
+import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.StringType
 import org.apache.spark.unsafe.types.UTF8String
 import org.apache.spark.util.{SerializableConfiguration, Utils}
@@ -95,6 +96,7 @@ object FileFormatWriter extends Logging {
       options: Map[String, String])
     : Set[String] = {
 
+    val conf: SQLConf = sparkSession.sqlContext.conf
     val job = Job.getInstance(hadoopConf)
     job.setOutputKeyClass(classOf[Void])
     job.setOutputValueClass(classOf[InternalRow])
@@ -117,7 +119,13 @@ object FileFormatWriter extends Logging {
       // Use `HashPartitioning.partitionIdExpression` as our bucket id expression, so that we can
       // guarantee the data distribution is same between shuffle and bucketed data source, which
       // enables us to only shuffle one side when join a bucketed table and a normal one.
-      HashPartitioning(bucketColumns, spec.numBuckets).partitionIdExpression
+      // ToDo: verify the flags
+      val hashFunction = if (conf.bucketingHiveCompatibleEnabled) {
+        Option("HiveHash")
+      } else {
+        None
+      }
+      HashPartitioning(bucketColumns, spec.numBuckets, hashFunction).partitionIdExpression
     }
     val sortColumns = bucketSpec.toSeq.flatMap {
       spec => spec.sortColumnNames.map(c => dataColumns.find(_.name == c).get)

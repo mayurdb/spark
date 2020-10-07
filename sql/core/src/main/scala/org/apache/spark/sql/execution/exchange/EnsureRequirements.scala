@@ -177,9 +177,9 @@ case class EnsureRequirements(conf: SQLConf) extends Rule[SparkPlan] {
       rightPartitioning: Partitioning): (Seq[Expression], Seq[Expression]) = {
     if (leftKeys.forall(_.deterministic) && rightKeys.forall(_.deterministic)) {
       (leftPartitioning, rightPartitioning) match {
-        case (HashPartitioning(leftExpressions, _), _) =>
+        case (HashPartitioning(leftExpressions, _, _), _) =>
           reorder(leftKeys.toIndexedSeq, rightKeys.toIndexedSeq, leftExpressions, leftKeys)
-        case (_, HashPartitioning(rightExpressions, _)) =>
+        case (_, HashPartitioning(rightExpressions, _, _)) =>
           reorder(leftKeys.toIndexedSeq, rightKeys.toIndexedSeq, rightExpressions, rightKeys)
         case _ =>
           (leftKeys, rightKeys)

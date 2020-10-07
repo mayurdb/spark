@@ -26,7 +26,7 @@ import org.apache.spark.sql._
 import org.apache.spark.sql.catalyst.catalog._
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.planning._
-import org.apache.spark.sql.catalyst.plans.logical.{InsertIntoDir, InsertIntoStatement, LogicalPlan, ScriptTransformation, Statistics}
+import org.apache.spark.sql.catalyst.plans.logical.{InsertIntoDir, InsertIntoStatement, LogicalPlan, RepartitionByExpressionAndHashFunc, ScriptTransformation, Sort, Statistics}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.execution._
 import org.apache.spark.sql.execution.command.{CreateTableCommand, DDLUtils}
@@ -176,6 +176,40 @@ object HiveAnalysis extends Rule[LogicalPlan] {
       if (overwrite) DDLUtils.verifyNotReadPath(child, outputPath)
 
       InsertIntoHiveDirCommand(isLocal, storage, child, overwrite, child.output.map(_.name))
+  }
+}
+
+case class HiveCompatibleBucketedWrite(conf: SQLConf) extends Rule[LogicalPlan] {
+  override def apply(plan: LogicalPlan): LogicalPlan = {
+    plan match {
+      case insert@InsertIntoHiveTable(table, _, query, _, _, _)
+        if rearrangeQuery(table) =>
+         val spec = table.bucketSpec.get
+        val bucketColumns = spec.bucketColumnNames.map(c => query.output.find(_.name == c).get)
+        val sortingColumns = spec.sortColumnNames.map(c => query.output.find(_.name == c).get)
+        val newPlan = Sort(
+          sortingColumns.map(SortOrder(_, Ascending)),
+          false,
+          RepartitionByExpressionAndHashFunc(
+            bucketColumns,
+            query,
+            spec.numBuckets,
+            Option("HiveHash")))
+        insert.copy(query = newPlan)
+      case _ =>
+        plan
+    }
+  }
+
+  private def rearrangeQuery(table: CatalogTable): Boolean = {
+    table.bucketSpec match {
+      case _ if !conf.bucketingHiveCompatibleEnabled =>
+        false
+      case Some(_) =>
+        true
+      case _ =>
+        false
+    }
   }
 }
 

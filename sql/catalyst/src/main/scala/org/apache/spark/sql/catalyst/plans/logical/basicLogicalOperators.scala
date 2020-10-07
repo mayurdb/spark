@@ -986,6 +986,45 @@ case class RepartitionByExpression(
 }
 
 /**
+ * This method repartitions data using [[Expression]]s into `numPartitions`, and receives
+ * information about the number of partitions during execution. Used when a specific ordering or
+ * distribution is expected by the consumer of the query result. Use [[Repartition]] for RDD-like
+ * `coalesce` and `repartition` Pass partition key to be used for partitioning, by default MurMur3
+ * Hash will be used.
+ */
+case class RepartitionByExpressionAndHashFunc(
+    partitionExpressions: Seq[Expression],
+    child: LogicalPlan,
+    numPartitions: Int,
+    hashFunction: Option[String] = None) extends RepartitionOperation {
+
+  require(numPartitions > 0, s"Number of partitions ($numPartitions) must be positive.")
+
+  val partitioning: Partitioning = {
+    val (sortOrder, nonSortOrder) = partitionExpressions.partition(_.isInstanceOf[SortOrder])
+
+    require(sortOrder.isEmpty || nonSortOrder.isEmpty,
+      s"${getClass.getSimpleName} expects that either all its `partitionExpressions` are of type " +
+        "`SortOrder`, which means `RangePartitioning`, or none of them are `SortOrder`, which " +
+        "means `HashPartitioning`. In this case we have:" +
+        s"""
+           |SortOrder: $sortOrder
+           |NonSortOrder: $nonSortOrder
+       """.stripMargin)
+
+    if (sortOrder.nonEmpty) {
+      RangePartitioning(sortOrder.map(_.asInstanceOf[SortOrder]), numPartitions)
+    } else if (nonSortOrder.nonEmpty) {
+      HashPartitioning(nonSortOrder, numPartitions, hashFunction)
+    } else {
+      RoundRobinPartitioning(numPartitions)
+    }
+  }
+
+  override def maxRows: Option[Long] = child.maxRows
+  override def shuffle: Boolean = true
+}
+/**
  * A relation with one row. This is used in "SELECT ..." without a from clause.
  */
 case class OneRowRelation() extends LeafNode {

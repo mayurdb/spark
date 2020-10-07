@@ -209,7 +209,8 @@ case object SinglePartition extends Partitioning {
  * of `expressions`.  All rows where `expressions` evaluate to the same values are guaranteed to be
  * in the same partition.
  */
-case class HashPartitioning(expressions: Seq[Expression], numPartitions: Int)
+case class HashPartitioning(expressions: Seq[Expression], numPartitions: Int,
+                            hashFunction: Option[String] = None)
   extends Expression with Partitioning with Unevaluable {
 
   override def children: Seq[Expression] = expressions
@@ -233,8 +234,14 @@ case class HashPartitioning(expressions: Seq[Expression], numPartitions: Int)
   /**
    * Returns an expression that will produce a valid partition ID(i.e. non-negative and is less
    * than numPartitions) based on hashing expressions.
+   * ToDo: Add pattern match for other hash functions
    */
-  def partitionIdExpression: Expression = Pmod(new Murmur3Hash(expressions), Literal(numPartitions))
+  def partitionIdExpression: Expression = hashFunction match {
+    case Some(hashFunc) if hashFunc.toLowerCase() == "hivehash" =>
+      Pmod(HiveHash(expressions), Literal(numPartitions))
+    case _ =>
+      Pmod(new Murmur3Hash(expressions), Literal(numPartitions))
+  }
 }
 
 /**

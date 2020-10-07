@@ -938,6 +938,13 @@ object SQLConf {
     .checkValue(_ > 0, "the value of spark.sql.sources.bucketing.maxBuckets must be greater than 0")
     .createWithDefault(100000)
 
+  val BUCKETING_HIVE_COMPATIBLE_ENABLED =
+    buildConf("spark.sql.sources.bucketing.hiveFormat.enabled")
+    .doc("Create single sorted file per bucket to make bucketing write compatible with hive")
+    .version("3.0.0")
+    .booleanConf
+    .createWithDefault(false)
+
   val CROSS_JOINS_ENABLED = buildConf("spark.sql.crossJoin.enabled")
     .internal()
     .doc("When false, we will throw an error if a query contains a cartesian product without " +
@@ -2960,6 +2967,9 @@ class SQLConf extends Serializable with Logging {
   def bucketingEnabled: Boolean = getConf(SQLConf.BUCKETING_ENABLED)
 
   def bucketingMaxBuckets: Int = getConf(SQLConf.BUCKETING_MAX_BUCKETS)
+
+  def bucketingHiveCompatibleEnabled: Boolean =
+    getConf(SQLConf.BUCKETING_HIVE_COMPATIBLE_ENABLED)
 
   def dataFrameSelfJoinAutoResolveAmbiguity: Boolean =
     getConf(DATAFRAME_SELF_JOIN_AUTO_RESOLVE_AMBIGUITY)
