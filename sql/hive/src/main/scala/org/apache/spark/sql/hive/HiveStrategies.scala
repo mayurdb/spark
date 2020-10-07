@@ -202,13 +202,15 @@ case class HiveCompatibleBucketedWrite(conf: SQLConf) extends Rule[LogicalPlan] 
   }
 
   private def rearrangeQuery(table: CatalogTable): Boolean = {
-    table.bucketSpec match {
-      case _ if !conf.bucketingHiveCompatibleEnabled =>
-        false
-      case Some(_) =>
-        true
-      case _ =>
-        false
+    DDLUtils.isHiveTable(table) && {
+      table.bucketSpec match {
+        case _ if !conf.bucketingHiveCompatibleEnabled =>
+          false
+        case Some(_) =>
+          true
+        case _ =>
+          false
+      }
     }
   }
 }
